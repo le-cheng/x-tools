@@ -8,18 +8,10 @@
  **************************************************************************************************/
 #pragma once
 
-#ifdef X_TOOLS_ENABLE_MODULE_PRIVATE
-#include "xApp/source/MainWindow.h"
-#else
-#include "App/MainWindow.h"
-#endif
+#include "Common/MainWindow.h"
 
 class IOPage;
-#ifdef X_TOOLS_ENABLE_MODULE_PRIVATE
-class MainWindow : public xApp::MainWindow
-#else
 class MainWindow : public xTools::MainWindow
-#endif
 {
     Q_OBJECT
 public:

@@ -6,7 +6,7 @@
  * xTools is licensed according to the terms in the file LICENCE(GPL V3) in the root of the source code
  * directory.
  **************************************************************************************************/
-#include "../xTools.h"
+#include "xTools.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -26,12 +26,13 @@
 #include <QProcess>
 #include <QScreen>
 #include <QStyle>
-#include <QStyleFactory>
 #include <QStyleHints>
 #include <QSvgRenderer>
 #include <QTimer>
 #include <QTranslator>
 #include <QUrl>
+
+#include <glog/logging.h>
 
 #include "xTools_p.h"
 
@@ -40,39 +41,144 @@ namespace xTools {
 xTools::xTools(QObject *parent)
     : QObject(*new xToolsPrivate, parent)
 {
-
+    QStringList list;
+    list << "xToolsCore";
+    languageSetSupportedPrefixes(list);
 }
 
-xTools &xTools::signleton()
+xTools &xTools::singleton()
 {
     Q_ASSERT_X(qApp, "xTools", "The xTools object must be created after application object.");
 
-    static xTools instance;
-    return instance;
+    static xTools singleton;
+    return singleton;
 }
 
-bool xTools::enableSplashScreen()
+void xTools::doSomethingBeforeAppCreated(char *argv[], const QString &appName, bool forStore)
+{
+    xTools &xTools = singleton();
+    xTools.appInitializeApp(appName, forStore);
+    xTools.tryToClearSettings();
+
+    xTools.googleLogInitializing(argv[0]);
+#ifdef QT_RELEASE
+    qInstallMessageHandler(googleLogToQtLog);
+#endif
+    xTools.appInitializeHdpi(appName, forStore);
+}
+
+void xTools::doSomethingAfterAppExited()
+{
+    xTools::googleLogShutdown();
+}
+
+void xTools::googleLogInitializing(char *argv0)
+{
+    xTools &xTools = singleton();
+    QString logPath = xTools.settingsPath();
+    logPath += "/log";
+    QDir dir(xTools.settingsPath());
+    if (!dir.exists(logPath) && !dir.mkpath(logPath)) {
+        qWarning() << "Make log directory failed";
+    }
+
+    auto keep = std::chrono::minutes(30 * 24 * 60);
+    google::SetLogFilenameExtension(".log");     // The suffix of log file.
+    google::EnableLogCleaner(keep);              // Keep the log file for 30 days.
+    google::SetApplicationFingerprint("xTools"); // (It seem to be no use.)
+
+    fLB::FLAGS_logtostdout = false;
+    fLB::FLAGS_logtostderr = false;
+    fLS::FLAGS_log_dir = logPath.toUtf8().data(); // The path of log.
+    fLI::FLAGS_logbufsecs = 0;                    //
+    fLU::FLAGS_max_log_size = 10;                 // The max size(MB) of log file.
+    fLB::FLAGS_stop_logging_if_full_disk = true;  //
+    fLB::FLAGS_alsologtostderr = true;            //
+
+    google::InitGoogleLogging(argv0);
+    qInfo() << "The logging path is:" << qPrintable(logPath);
+}
+
+void xTools::googleLogShutdown()
+{
+    google::ShutdownGoogleLogging();
+}
+
+void xTools::googleLogToQtLog(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+{
+    QByteArray localMsg = msg.toUtf8();
+    const char *file = context.file ? context.file : "";
+    const int line = context.line;
+
+    switch (type) {
+    case QtWarningMsg:
+        google::LogMessage(file, line, google::GLOG_WARNING).stream() << localMsg.data();
+        break;
+    case QtCriticalMsg:
+        google::LogMessage(file, line, google::GLOG_ERROR).stream() << localMsg.data();
+        break;
+    case QtFatalMsg:
+        google::LogMessage(file, line, google::GLOG_FATAL).stream() << localMsg.data();
+        break;
+    default:
+        google::LogMessage(file, line, google::GLOG_INFO).stream() << localMsg.data();
+        break;
+    }
+
+    if (gOutputLog2Ui) {
+        (*gOutputLog2Ui)(type, context, msg);
+    }
+}
+
+bool xTools::splashScreenIsEnable()
 {
     Q_D(xTools);
     return d->m_enableSplashScreen;
 }
 
-void xTools::setEnableSplashScreen(bool enable)
+void xTools::splashScreenSetIsEnable(bool enable)
 {
     Q_D(xTools);
     d->m_enableSplashScreen = enable;
 }
 
-void xTools::setSplashScreenMessage(const QString &msg)
+void xTools::splashScreenSetMessage(const QString &msg)
 {
     Q_D(xTools);
-    d->m_splashScreen.showMessage(msg);
+    d->m_splashScreen->showMessage(msg);
 }
 
-QSplashScreen *xTools::splashScreen()
+void xTools::splashScreenShow()
+{
+    if (!qApp) {
+        return;
+    }
+
+    QFont font = qApp->font();
+    font.setPixelSize(52);
+
+    QFontMetrics fontMetrics(font);
+    const QString displayName = g_xTools.appFriendlyName();
+    int width = fontMetrics.boundingRect(displayName).width() * 1.2;
+
+    QPixmap pixmap(width < 600 ? 600 : width, 260);
+    pixmap.fill(QColor(0x2d2d30));
+
+    QPainter painter(&pixmap);
+    painter.setPen(QColor(Qt::white));
+    painter.setFont(font);
+    painter.drawText(pixmap.rect(), Qt::AlignHCenter | Qt::AlignVCenter, displayName);
+    painter.drawRect(pixmap.rect() - QMargins(1, 1, 1, 1));
+
+    Q_D(xTools);
+    d->m_splashScreen = new QSplashScreen(pixmap);
+    d->m_splashScreen->show();
+}
+
+QSplashScreen *xTools::splashScreenGet()
 {
     Q_D(xTools);
-    return &d->m_splashScreen;
+    return d->m_splashScreen;
 }
 
 QString xTools::appFriendlyName()
@@ -81,10 +187,43 @@ QString xTools::appFriendlyName()
     return d->m_appFriendlyName;
 }
 
-void xTools::setAppFriendlyName(const QString &name)
+void xTools::appSetFriendlyName(const QString &name)
 {
     Q_D(xTools);
     d->m_appFriendlyName = name;
+}
+
+void xTools::appInitializeApp(const QString &appName, bool forStore)
+{
+    QString cookedAppName = appName;
+    if (forStore) {
+        cookedAppName += QString("(Store)");
+    }
+
+    cookedAppName.remove(" ");
+    QCoreApplication::setOrganizationName(QString("xTools"));
+    QCoreApplication::setOrganizationDomain(QString("IT"));
+    QCoreApplication::setApplicationName(cookedAppName);
+    appSetFriendlyName(appName);
+}
+
+void xTools::appInitializeHdpi(const QString &appName, bool forStore)
+{
+#if 0
+    qputenv("QT_SCALE_FACTOR", "1.5");
+#endif
+
+    Q_D(xTools);
+    int policy = settingsHdpiPolicy();
+    if (!hdpiIsValidPolicy(policy)) {
+        qWarning() << "The value of hdpi policy is not specified, set to default value:"
+                   << QGuiApplication::highDpiScaleFactorRoundingPolicy();
+        return;
+    }
+
+    const auto cookedPolicy = static_cast<Qt::HighDpiScaleFactorRoundingPolicy>(policy);
+    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(cookedPolicy);
+    qInfo() << "The current high dpi policy is:" << cookedPolicy;
 }
 
 QString xTools::appVersion()
@@ -92,7 +231,7 @@ QString xTools::appVersion()
     return QApplication::applicationVersion();
 }
 
-QString xTools::defaultAppLanguage()
+QString xTools::languageDefaultLanguage()
 {
     Q_D(xTools);
     QSettings *settings = d->m_settings;
@@ -109,26 +248,26 @@ QString xTools::defaultAppLanguage()
     return d->m_languageFlagNameMap.value(language);
 }
 
-QStringList xTools::supportedAppLanguages()
+QStringList xTools::languageSupportedLanguages()
 {
     Q_D(xTools);
     return d->m_languageFlagNameMap.values();
 }
 
-QStringList xTools::supportedAppLanguagePrefixes()
+QStringList xTools::languageSupportedPrefixes()
 {
     Q_D(xTools);
     // Such as "xToolsCore", "xApp"
     return d->m_appSupportedLanguagePrefixes;
 }
 
-void xTools::setSupportedAppLanguagePrefixes(const QStringList &prefixes)
+void xTools::languageSetSupportedPrefixes(const QStringList &prefixes)
 {
     Q_D(xTools);
     d->m_appSupportedLanguagePrefixes = prefixes;
 }
 
-void xTools::setupAppLanguageWithPrefix(const QString &language, const QString &prefix)
+void xTools::languageSetupAppLanguageWithPrefix(const QString &language, const QString &prefix)
 {
     Q_D(xTools);
     QString key = d->m_languageFlagNameMap.key(language);
@@ -176,20 +315,20 @@ void xTools::setupAppLanguageWithPrefix(const QString &language, const QString &
     }
 }
 
-void xTools::setupAppLanguage(const QString &language)
+void xTools::languageSetupAppLanguage(const QString &language)
 {
     Q_D(xTools);
     QString tmp = language;
     if (tmp.isEmpty()) {
         tmp = d->m_settings->value("language").toString();
         if (tmp.isEmpty()) {
-            tmp = defaultAppLanguage();
+            tmp = languageDefaultLanguage();
         }
     }
 
-    QStringList prefixes = supportedAppLanguagePrefixes();
+    QStringList prefixes = languageSupportedPrefixes();
     for (const auto &prefix : prefixes) {
-        setupAppLanguageWithPrefix(tmp, prefix);
+        languageSetupAppLanguageWithPrefix(tmp, prefix);
     }
 }
 
@@ -228,7 +367,7 @@ QString xTools::xToolsLastCommitTime()
 #endif
 }
 
-QVariantList xTools::supportedHdpiPolicies()
+QVariantList xTools::hdpiSupportedPolicies()
 {
     QMetaEnum metaEnum = QMetaEnum::fromType<Qt::HighDpiScaleFactorRoundingPolicy>();
     QVariantList list;
@@ -254,24 +393,24 @@ QString xTools::hdpiPolicyName(int policy)
     return policyMap.value(static_cast<Policy>(policy), "Unknown");
 }
 
-bool xTools::isValidHdpiPolicy(int policy)
+bool xTools::hdpiIsValidPolicy(int policy)
 {
-    auto policies = supportedHdpiPolicies();
+    auto policies = hdpiSupportedPolicies();
     return policies.contains(QVariant(policy));
 }
 
-QString xTools::stringToHexString(const QString &str)
+QString xTools::formatStringToHexString(const QString &str)
 {
     return QString::fromLatin1(str.toUtf8().toHex());
 }
 
-QString xTools::hexStringToString(const QString &str)
+QString xTools::formatHexStringToString(const QString &str)
 {
     QByteArray arr = QByteArray::fromHex(str.toUtf8());
     return QString::fromUtf8(arr);
 }
 
-QByteArray xTools::byteArray2Hex(const QByteArray &source, char separator)
+QByteArray xTools::formatByteArray2Hex(const QByteArray &source, char separator)
 {
     if (source.isEmpty()) {
         return source;
@@ -292,12 +431,12 @@ QByteArray xTools::byteArray2Hex(const QByteArray &source, char separator)
     return hex;
 }
 
-QString xTools::dateTimeString(const QString &format)
+QString xTools::dtDateTimeString(const QString &format)
 {
     return QDateTime::currentDateTime().toString(format);
 }
 
-QDateTime xTools::buildDateTime()
+QDateTime xTools::dtBuildDateTime()
 {
     QString dateString = QString(__DATE__);
     QString timeString = QString(__TIME__);
@@ -307,54 +446,54 @@ QDateTime xTools::buildDateTime()
     return dateTime;
 }
 
-QString xTools::buildDateTimeString(const QString &format)
+QString xTools::dtBuildDateTimeString(const QString &format)
 {
-    return buildDateTime().toString(format);
+    return dtBuildDateTime().toString(format);
 }
 
-QString xTools::systemDateFormat()
+QString xTools::dtSystemDateFormat()
 {
     return QLocale::system().dateFormat();
 }
 
-QString xTools::systemTimeFormat()
+QString xTools::dtSystemTimeFormat()
 {
     return QLocale::system().timeFormat();
 }
 
-QString xTools::desktopPath()
+QString xTools::sysDesktopPath()
 {
     return QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
 }
 
-QString xTools::clipboardText()
+QString xTools::sysClipboardText()
 {
     return QGuiApplication::clipboard()->text();
 }
 
-void xTools::setClipboardText(const QString &text)
+void xTools::sysSetClipboardText(const QString &text)
 {
     QGuiApplication::clipboard()->setText(text);
 }
 
-void xTools::openUrl(const QString &url)
+void xTools::sysOpenUrl(const QString &url)
 {
     QDesktopServices::openUrl(QUrl(url));
 }
 
-QIcon xTools::toThemeIcon(const QIcon &icon)
+QIcon xTools::iconToThemeIcon(const QIcon &icon)
 {
     const QString color = qApp->palette().windowText().color().name();
-    return cookedIcon(icon, color);
+    return iconCookedIcon(icon, color);
 }
 
-QIcon xTools::cookedIconFile(const QString &iconFile, const QString &color)
+QIcon xTools::iconCookedIconFile(const QString &iconFile, const QString &color)
 {
     QIcon icon(iconFile);
-    return cookedIcon(icon, color);
+    return iconCookedIcon(icon, color);
 }
 
-QIcon xTools::cookedIcon(const QIcon &icon, const QString &color)
+QIcon xTools::iconCookedIcon(const QIcon &icon, const QString &color)
 {
     QPixmap pixmap = icon.pixmap(QSize(128, 128));
     QPainter painter(&pixmap);
@@ -447,7 +586,7 @@ void xTools::settingsSetClearSettings(bool clear)
 int xTools::settingsColorScheme()
 {
     Q_D(xTools);
-    auto var = d->m_settings->value("colorScheme");
+    auto var = d->m_settings->value("colorScheme", static_cast<int>(Qt::ColorScheme::Unknown));
     if (var.isValid()) {
         return var.toInt();
     }
@@ -484,6 +623,12 @@ void xTools::settingsSetJsonObjectStringValue(const QString &key, const QString 
     d->m_settings->setValue(key, doc.toVariant());
 }
 
+QSettings *xTools::settings()
+{
+    Q_D(xTools);
+    return d->m_settings;
+}
+
 QMainWindow *xTools::mainWindow()
 {
     for (const auto &widget : qApp->topLevelWidgets()) {
@@ -510,17 +655,20 @@ void xTools::moveToScreenCenter(QWidget *widget)
     }
 }
 
-void xTools::tryToReboot()
+bool xTools::tryToReboot()
 {
     int ret = QMessageBox::information(
         nullptr,
-        QObject::tr("Neet to Reboot"),
-        QObject::tr("The operation need to reboot to effectived, reboot the applicaion now?"),
+        tr("Need to Reboot"),
+        tr("The operation need to reboot to effected, reboot the application now?"),
         QMessageBox::Ok | QMessageBox::Cancel);
     if (ret == QMessageBox::Ok) {
         QProcess::startDetached(QApplication::applicationFilePath(), QStringList());
         qApp->closeAllWindows();
+        return true;
     }
+
+    return false;
 }
 
 void xTools::tryToClearSettings()

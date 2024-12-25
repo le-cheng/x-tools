@@ -31,8 +31,7 @@
 #include <QTimer>
 #include <QUrl>
 
-#include "App/Application.h"
-#include "App/Settings.h"
+#include "Common/xTools.h"
 
 #ifdef X_TOOLS_ENABLE_MODULE_STYLESHEET
 #include "StyleSheetManager.h"
@@ -56,9 +55,6 @@ MainWindow::MainWindow(QWidget* parent)
     , m_languageActionGroup(nullptr)
     , m_appPaletteActionGroup(nullptr)
 {
-    m_xToolsApp = dynamic_cast<Application*>(QCoreApplication::instance());
-    Q_ASSERT_X(m_xToolsApp, Q_FUNC_INFO, "The application is not xToolsApplication.");
-
     m_appStyleActionGroup = new QActionGroup(this);
     m_languageActionGroup = new QActionGroup(this);
     m_appPaletteActionGroup = new QActionGroup(this);
@@ -117,9 +113,10 @@ QIcon MainWindow::cookedIcon(const QIcon& icon)
 
 void MainWindow::updateWindowTitle()
 {
-    QString title = Application::friendlyAppName();
+    xTools& xTools = xTools::singleton();
+    QString title = xTools.appFriendlyName();
     title += " v";
-    title += Application::applicationVersion();
+    title += QApplication::applicationVersion();
     setWindowTitle(title);
 }
 
@@ -156,14 +153,9 @@ void MainWindow::initMenuLanguage()
     m_languageMenu = new QMenu(tr("&Languages"), this);
     menuBar()->addMenu(m_languageMenu);
 
-    auto* app = dynamic_cast<Application*>(QCoreApplication::instance());
-    if (!app) {
-        qWarning() << "The application is not xToolsApplication.";
-        return;
-    }
-
-    QStringList languages = app->supportedLanguages();
-    QString settingLanguage = Settings::instance()->language();
+    xTools& xTools = xTools::singleton();
+    QStringList languages = xTools.languageSupportedLanguages();
+    QString settingLanguage = xTools.settingsLanguage();
     for (auto& language : languages) {
         auto* action = new QAction(language, this);
         action->setCheckable(true);
@@ -171,12 +163,12 @@ void MainWindow::initMenuLanguage()
         m_languageActionGroup->addAction(action);
 
         connect(action, &QAction::triggered, this, [=]() {
-            Settings::instance()->setLanguage(language);
-            tryToReboot();
+            g_xTools.languageSetupAppLanguage(language);
+            g_xTools.tryToReboot();
         });
 
         if (settingLanguage.isEmpty()) {
-            if (language == app->defaultLanguage()) {
+            if (language == xTools.languageDefaultLanguage()) {
                 action->setChecked(true);
             }
         } else {
@@ -206,10 +198,11 @@ void MainWindow::initMenuHelp()
 
 void MainWindow::initOptionMenuAppStyleMenu()
 {
+    xTools& xTools = xTools::singleton();
     m_appStyleMenu = new QMenu(tr("Application Style"), this);
     m_optionMenu->addMenu(m_appStyleMenu);
     QStringList keys = QStyleFactory::keys();
-    const QString style = Settings::instance()->appStyle();
+    const QString style = xTools.settingsAppStyle();
     for (QString& key : keys) {
         auto* action = new QAction(key, this);
         action->setObjectName(key);
@@ -221,7 +214,7 @@ void MainWindow::initOptionMenuAppStyleMenu()
         }
 
         connect(action, &QAction::triggered, this, [=]() {
-            Settings::instance()->setAppStyle(key);
+            g_xTools.settingsSetAppStyle(key);
             tryToReboot();
         });
     }
@@ -241,17 +234,16 @@ void MainWindow::initOptionMenuSettingsMenu()
     auto clearAction = new QAction(tr("Clear Settings"), this);
     menu->addAction(clearAction);
     connect(clearAction, &QAction::triggered, this, [=]() {
-        Settings::instance()->setClearSettings(true);
+        xTools& xTools = xTools::singleton();
+        xTools.settingsSetClearSettings(true);
         tryToReboot();
     });
 
     auto openAction = new QAction(tr("Open Settings Directory"), this);
     menu->addAction(openAction);
     connect(openAction, &QAction::triggered, this, [=]() {
-        QString file_name = Settings::instance()->fileName();
-        QUrl fileUrl = QUrl(file_name);
-        QString path = file_name.remove(fileUrl.fileName());
-        QDesktopServices::openUrl(path);
+        xTools& xTools = xTools::singleton();
+        QDesktopServices::openUrl(xTools.settingsPath());
     });
 }
 
@@ -259,10 +251,11 @@ void MainWindow::initOptionMenuHdpiPolicy()
 {
     QMenu* menu = new QMenu(tr("HDPI Policy"));
     QActionGroup* actionGroup = new QActionGroup(this);
-    int currentPolicy = Settings::instance()->hdpiPolicy();
-    auto supportedPolicies = Application::supportedHighDpiPolicies();
+    xTools& xTools = xTools::singleton();
+    int currentPolicy = xTools.settingsHdpiPolicy();
+    auto supportedPolicies = xTools.hdpiSupportedPolicies();
     for (auto& policy : supportedPolicies) {
-        auto name = Application::highDpiPolicyName(policy.toInt());
+        auto name = xTools.hdpiPolicyName(policy.toInt());
         auto action = menu->addAction(name, this, [=]() {
             onHdpiPolicyActionTriggered(policy.toInt());
         });
@@ -297,20 +290,22 @@ void MainWindow::initOptionMenuColorScheme()
     m_optionMenu->addMenu(m_colorSchemeMenu);
 
     connect(&actionGroup, &QActionGroup::triggered, this, [=](QAction* action) {
+        xTools& xTools = xTools::singleton();
         if (action == dark) {
-            Settings::instance()->setColorScheme(static_cast<int>(Qt::ColorScheme::Dark));
+            xTools.settingsSetColorScheme(static_cast<int>(Qt::ColorScheme::Dark));
         } else if (action == light) {
-            Settings::instance()->setColorScheme(static_cast<int>(Qt::ColorScheme::Light));
+            xTools.settingsSetColorScheme(static_cast<int>(Qt::ColorScheme::Light));
         } else {
-            Settings::instance()->setColorScheme(static_cast<int>(Qt::ColorScheme::Unknown));
+            xTools.settingsSetColorScheme(static_cast<int>(Qt::ColorScheme::Unknown));
         }
 
-        auto currentScheme = Settings::instance()->colorScheme();
+        auto currentScheme = xTools.settingsColorScheme();
         QStyleHints* styleHints = QApplication::styleHints();
         styleHints->setColorScheme(static_cast<Qt::ColorScheme>(currentScheme));
     });
 
-    auto currentScheme = Settings::instance()->colorScheme();
+    xTools& xTools = xTools::singleton();
+    auto currentScheme = xTools.settingsColorScheme();
     switch (currentScheme) {
     case static_cast<int>(Qt::ColorScheme::Dark):
         dark->setChecked(true);
@@ -330,18 +325,20 @@ void MainWindow::initOptionMenuColorScheme()
 
 void MainWindow::onHdpiPolicyActionTriggered(int policy)
 {
-    Settings::instance()->setHdpiPolicy(int(policy));
+    xTools& xTools = xTools::singleton();
+    xTools.settingsSetHdpiPolicy(int(policy));
     tryToReboot();
 }
 
 void MainWindow::onAboutActionTriggered()
 {
-    QString buildDateTimeFormat = Application::systemDateFormat();
+    xTools& xTools = xTools::singleton();
+    QString buildDateTimeFormat = xTools.dtSystemDateFormat();
     buildDateTimeFormat += " ";
-    buildDateTimeFormat += Application::systemTimeFormat();
-    QString buildDateTimeString = Application::buildDateTimeString(buildDateTimeFormat);
-    QString year = Application::buildDateTimeString("yyyy");
-    const QString version = Application::applicationVersion();
+    buildDateTimeFormat += xTools.dtSystemTimeFormat();
+    QString buildDateTimeString = xTools.dtBuildDateTimeString(buildDateTimeFormat);
+    QString year = xTools.dtBuildDateTimeString("yyyy");
+    const QString version = xTools.xToolsVersion();
     const QString name = qApp->applicationName();
     QString info;
     info += name + QString(" ") + version + " " + tr("(A Part of xTools Project)") + "\n\n";
@@ -359,7 +356,7 @@ void MainWindow::onAboutActionTriggered()
 
 bool MainWindow::tryToReboot()
 {
-    return Application::tryToReboot();
+    return g_xTools.tryToReboot();
 }
 
 void MainWindow::createQtConf()

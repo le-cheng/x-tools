@@ -13,8 +13,8 @@
 #include <QNetworkAddressEntry>
 #include <QNetworkInterface>
 
-#include "App/Application.h"
 #include "BroadcastThread.h"
+#include "Common/xTools.h"
 #include "IO/xIO.h"
 
 BroadcastAssistant::BroadcastAssistant(QWidget* parent)
