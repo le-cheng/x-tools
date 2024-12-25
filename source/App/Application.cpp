@@ -297,7 +297,7 @@ QString Application::desktopPath()
     return QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
 }
 
-QString Application::appVersioin()
+auto Application::appVersioin()-> QString
 {
     QString version = "0.0.0";
 #if defined(X_TOOLS_GIT_TAG)
@@ -310,7 +310,10 @@ QString Application::appVersioin()
             version = tag;
         }
     }
+#else
+    qWarning() << "X_TOOLS_GIT_TAG is not defined, using default version: 0.0.0";
 #endif
+
     return version;
 }
 

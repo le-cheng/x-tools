@@ -59,6 +59,16 @@ void tryToRebootApp();
  * parameter of the function is the instance of the main window and the instance of the application.
  * \return
  */
+/**
+ * \brief exec: 使用此函数启动应用程序并指定主窗口的中心部件类型。如果主窗口与中心部件相同，
+ * 则不会创建主窗口，而是将中心部件实例作为主窗口。
+ * \param argc: 命令行参数的数量。
+ * \param argv: 命令行参数数组。
+ * \param appName: 应用程序的名称。
+ * \param version: 应用程序的版本。
+ * \param doSomethingBeforAppExec: 在应用程序执行前调用的函数。该函数的参数是主窗口实例和应用程序实例。
+ * \return 返回值。
+ */
 template<typename CentralWidgetT, typename MainWindowT, typename ApplicationT>
 int exec(int argc,
          char *argv[],
