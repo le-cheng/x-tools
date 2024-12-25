@@ -647,8 +647,11 @@ void xIO::setupPortName(QComboBox *comboBox)
 {
     QList<QSerialPortInfo> infos = QSerialPortInfo::availablePorts();
     for (const auto &info : infos) {
-        comboBox->addItem(info.portName());
+        // comboBox->addItem(info.portName());
+        QString itemText = QString("%1 - %2").arg(info.portName(), info.description());
+        comboBox->addItem(itemText);
     }
+
 }
 
 void xIO::setupBaudRate(QComboBox *comboBox)
