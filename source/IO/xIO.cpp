@@ -162,21 +162,26 @@ QString xIO::bytes2string(const QByteArray &bytes, int format)
         return str.toUpper();
     };
 
+    QString result;
     if (static_cast<int>(TextFormat::Bin) == format) {
-        return cookedArray(bytes, 2, 8);
+        result = cookedArray(bytes, 2, 8);
     } else if (static_cast<int>(TextFormat::Oct) == format) {
-        return cookedArray(bytes, 8, 3);
+        result = cookedArray(bytes, 8, 3);
     } else if (static_cast<int>(TextFormat::Dec) == format) {
-        return cookedArray(bytes, 10, 3);
+        result = cookedArray(bytes, 10, 3);
     } else if (static_cast<int>(TextFormat::Hex) == format) {
-        return cookedArray(bytes, 16, 2);
+        result = cookedArray(bytes, 16, 2);
     } else if (static_cast<int>(TextFormat::Ascii) == format) {
-        return QString::fromLatin1(bytes);
+        result = QString::fromLatin1(bytes);
     } else if (static_cast<int>(TextFormat::Utf8) == format) {
-        return QString::fromUtf8(bytes);
+        result = QString::fromUtf8(bytes);
     } else {
-        return QString("Unsupported text format: %1").arg(static_cast<int>(format));
+        result = QString("Unsupported text format: %1").arg(static_cast<int>(format));
     }
+    result.replace("\\n", "\n");
+    result.replace("\\r", "\r");
+
+    return result;
 }
 
 QByteArray xIO::string2bytes(const QString &text, int format)
